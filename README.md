@@ -14,6 +14,10 @@
 
 `bash scripts/run_all.sh` 一条命令跑完四条，**任一不过即非零退出**；本次运行输出原文见 `evidence/run_all.out`（末尾 `ALL CHECKS PASSED`）。
 
+`MANIFEST.sha256` 覆盖 35 个静态交付物（脚本 / 配置 / 文档 / 截图 / 稳定证据）。
+两个**每次运行都会变**的文件不进清单（否则复跑一次验收清单就必然失效）：`evidence/run_all.out`（整轮输出原文）与 `evidence/ac4-dev-user-api.json`（截图脚本抓的 API 状态码，带抓取时间）；它们仍在仓里，由 git 保证版本。
+清单重算：`bash scripts/regen_manifest.sh`；校验：`sha256sum -c MANIFEST.sha256`。
+
 ### 工单正文里另外三项要求（已实现，证据同上）
 
 | 工单要求 | 实现 | 证据 |
