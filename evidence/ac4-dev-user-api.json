@@ -1,0 +1,19 @@
+{
+  "user": "dev-user",
+  "org_role": "None",
+  "captured_at": "2026-11-25T08:38:22.647Z",
+  "results": {
+    "/api/datasources": {
+      "status": 403,
+      "body": "{\"accessErrorId\":\"ACE9715518754\",\"message\":\"You'll need additional permissions to perform this action. Permissions needed: datasources:read\",\"title\":\"Access denied\"}\n"
+    },
+    "/api/datasources/uid/loki": {
+      "status": 403,
+      "body": "{\"accessErrorId\":\"ACE4357021149\",\"message\":\"You'll need additional permissions to perform this action. Permissions needed: datasources:read\",\"title\":\"Access denied\"}\n"
+    },
+    "/api/dashboards/home": {
+      "status": 200,
+      "body": "{\"meta\":{\"canSave\":false,\"canEdit\":false,\"canAdmin\":false,\"canStar\":false,\"canDelete\":false,\"slug\":\"\",\"url\":\"\",\"expires\":\"0001-01-01T00:00:00Z\",\"created\":\"0001-01-01T00:00:00Z\",\"updated\":\"0001-01-01T00:00:00Z\",\"updatedBy\":\"\",\"createdBy\":\"\",\"version\":0,\"hasAcl\":false,\"isFolder\":false,\"folderId\":0,\"fo"
+    }
+  }
+}

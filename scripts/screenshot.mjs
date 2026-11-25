@@ -36,6 +36,7 @@ const ADMIN_USER = process.env.GRAFANA_ADMIN_USER || 'admin';
 const ADMIN_PASS = process.env.GRAFANA_ADMIN_PASSWORD;
 const USERS_FILE = process.env.GRAFANA_USERS_FILE || `${process.env.HOME}/.clawhunt/3192-grafana-users.env`;
 const REQUEST_ID = process.env.REQUEST_ID;
+const SCRIPT_DIR = path.dirname(new URL(import.meta.url).pathname);
 const OUT = path.resolve(process.argv[2] || 'screenshots');
 const CHROME = process.env.CHROME_PATH || process.env.CHROMIUM_PATH ||
   '/root/.cache/ms-playwright/chromium-1255/chrome-linux64/chrome';
@@ -94,9 +95,38 @@ async function shotDashboard(page, dashUid, requestId, file, expectText) {
     console.warn(`  ⚠️ 没等到 ${expectText}，仍然截图`);
   }
   await page.waitForTimeout(2000);
-  // 整页截图：把「按 request_id 追踪」面板也拍进去（AC1 的关键证据）
-  await page.screenshot({ path: path.join(OUT, file), fullPage: true });
+  // 视口截图（只拍首屏）：视口外的面板不被 react-grid 渲染，整页截图下半部分是空白
+  await page.screenshot({ path: path.join(OUT, file), fullPage: false });
   console.log(`  ✔ ${file}`);
+}
+
+// 按面板标题裁剪出「单个面板」的截图（AC2 用：聚焦「近期应用日志」面板，
+// 让手机号/身份证/Bearer 的屏蔽形态一眼可见，而不是混在整页里）
+async function shotPanel(page, dashUid, requestId, file, panelTitle, expectText) {
+  // 面板可能在首屏之外（react-grid 虚拟渲染 ⇒ 视口外的面板不在 DOM 里），
+  // ⇒ 用 Grafana 的 viewPanel 参数单独打开该面板，路径确定、无需滚动。
+  const dashFile = path.join(SCRIPT_DIR, '..', 'grafana', 'dashboards', `${dashUid}.json`);
+  const dash = JSON.parse(fs.readFileSync(dashFile, 'utf-8'));
+  const panel = (dash.panels || []).find((x) => (x.title || '').includes(panelTitle));
+  if (!panel) {
+    console.warn(`  ⚠️ 仪表盘 ${dashUid} 里找不到面板「${panelTitle}」，整页截图`);
+    await page.goto(`${GRAFANA_URL}/d/${dashUid}/${dashUid}?var-request_id=${encodeURIComponent(requestId)}`,
+      { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(6000);
+    await page.screenshot({ path: path.join(OUT, file), fullPage: true });
+    return;
+  }
+  const url = `${GRAFANA_URL}/d/${dashUid}/${dashUid}?viewPanel=${panel.id}&var-request_id=${encodeURIComponent(requestId)}&refresh=10s`;
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(6000);
+  try {
+    await page.waitForSelector(`text=${expectText}`, { timeout: 45000 });
+  } catch (e) {
+    console.warn(`  ⚠️ 没等到 ${expectText}，仍然截图`);
+  }
+  await page.waitForTimeout(2500);
+  await page.screenshot({ path: path.join(OUT, file), fullPage: false });
+  console.log(`  ✔ ${file}（单独打开面板「${panelTitle}」id=${panel.id}）`);
 }
 
 async function shotExplore(page, query, file, expectText) {
@@ -130,8 +160,14 @@ const browser = await chromium.launch({ executablePath: CHROME, args: ['--no-san
   const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 1 });
   const page = await ctx.newPage();
   await login(ctx, page, ADMIN_USER, ADMIN_PASS);
-  await shotDashboard(page, 'loki-log-panels', REQUEST_ID, 'ac1-request-id-all-lines.png', REQUEST_ID);
-  await shotDashboard(page, 'loki-log-panels', REQUEST_ID, 'ac2-masked-phone.png', '138****1111');
+  // AC1：单独打开「按 request_id 追踪」面板（视口外的面板不会被 react-grid 渲染，
+  //       整页截图会是空白 ⇒ 证据必须落在 viewPanel 上）
+  await shotPanel(page, 'loki-log-panels', REQUEST_ID, 'ac1-request-id-all-lines.png',
+    '按 request_id 追踪：一次请求的全部日志行（AC1）', REQUEST_ID);
+  // 面板三件套（工单要求：错误日志趋势 / 按 service 统计 error 数 / route 点击跳转）
+  await shotDashboard(page, 'loki-log-panels', REQUEST_ID, 'ac1-dashboard-overview.png', '错误日志趋势');
+  await shotPanel(page, 'loki-log-panels', REQUEST_ID, 'ac2-masked-phone.png',
+    '脱敏样本：手机号 / 身份证 / Bearer（AC2）', '138****1111');
   // 数据源列表（对照：admin 能看到 Loki）
   await page.goto(`${GRAFANA_URL}/connections/datasources`, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(3000);
@@ -148,13 +184,24 @@ const browser = await chromium.launch({ executablePath: CHROME, args: ['--no-san
   // 数据源页：无权限 ⇒ 被弹回首页，导航里也没有 Connections / Explore
   await page.goto(`${GRAFANA_URL}/connections/datasources`, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(4000);
-  await page.screenshot({ path: path.join(OUT, 'ac4-dev-user-datasources.png') });
-  console.log('  ✔ ac4-dev-user-datasources.png');
-  // Explore 页：没有可选数据源
-  await page.goto(`${GRAFANA_URL}/explore`, { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(4000);
-  await page.screenshot({ path: path.join(OUT, 'ac4-dev-user-explore.png') });
-  console.log('  ✔ ac4-dev-user-explore.png');
+  await page.screenshot({ path: path.join(OUT, 'ac4-dev-user-no-datasource.png') });
+  console.log('  ✔ ac4-dev-user-no-datasource.png');
+  // API 级证据：dev-user 调 GET /api/datasources ⇒ 403（UI 上被弹回首页只是表象）
+  const apiRes = await page.evaluate(async () => {
+    const out = {};
+    for (const q of ['/api/datasources', '/api/datasources/uid/loki', '/api/dashboards/home']) {
+      try {
+        const r = await fetch(q, { credentials: 'include' });
+        out[q] = { status: r.status, body: (await r.text()).slice(0, 300) };
+      } catch (e) { out[q] = { error: String(e) }; }
+    }
+    return out;
+  });
+  const evidenceDir = path.join(OUT, '..', 'evidence');
+  fs.mkdirSync(evidenceDir, { recursive: true });
+  fs.writeFileSync(path.join(evidenceDir, 'ac4-dev-user-api.json'),
+    JSON.stringify({ user: 'dev-user', org_role: 'None', captured_at: new Date().toISOString(), results: apiRes }, null, 2));
+  console.log('  ✔ evidence/ac4-dev-user-api.json（dev-user 调数据源 API 的真实状态码）');
   await ctx.close();
 }
 

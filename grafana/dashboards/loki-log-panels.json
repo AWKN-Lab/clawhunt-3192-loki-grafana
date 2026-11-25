@@ -21,129 +21,125 @@
   "links": [],
   "panels": [
     {
-      "id": 1,
+      "id": 100,
       "type": "timeseries",
-      "title": "日志写入速率（5 分钟窗口计数）",
-      "datasource": {
-        "type": "loki",
-        "uid": "loki"
-      },
+      "title": "错误日志趋势（5 分钟窗口计数）",
       "gridPos": {
-        "h": 8,
+        "h": 10,
         "w": 12,
         "x": 0,
         "y": 0
       },
-      "targets": [
-        {
-          "datasource": {
-            "type": "loki",
-            "uid": "loki"
-          },
-          "editorMode": "code",
-          "expr": "sum(count_over_time({service=\"app\"} [5m]))",
-          "legendFormat": "错误数",
-          "queryType": "range",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      }
-    },
-    {
-      "id": 2,
-      "type": "barchart",
-      "title": "按 service 统计的 error 数",
       "datasource": {
         "type": "loki",
         "uid": "loki"
       },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(count_over_time({service=\"app\"} | level=~\"(?i)error\" [5m]))",
+          "queryType": "range",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 101,
+      "type": "barchart",
+      "title": "按 service 统计的 error 数",
       "gridPos": {
-        "h": 8,
+        "h": 10,
         "w": 12,
         "x": 12,
         "y": 0
       },
-      "targets": [
-        {
-          "datasource": {
-            "type": "loki",
-            "uid": "loki"
-          },
-          "editorMode": "code",
-          "expr": "sum by (service) (count_over_time({service=~\".+\"} |~ \"(?i)error\" [5m]))",
-          "legendFormat": "{{service}}",
-          "queryType": "range",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "options": {
-        "orientation": "auto",
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      }
-    },
-    {
-      "id": 3,
-      "type": "logs",
-      "title": "近期应用日志：手机号 / 身份证 / Bearer 均已屏蔽（AC2）",
       "datasource": {
         "type": "loki",
         "uid": "loki"
       },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (service) (count_over_time({service=~\".+\"} | level=~\"(?i)error\" [5m]))",
+          "queryType": "range",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 102,
+      "type": "table",
+      "title": "路由清单（点击行跳到对应时间段日志）",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 10
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (route) (count_over_time({service=\"app\"} | level=~\"(?i)error\" [5m]))",
+          "queryType": "range",
+          "editorMode": "code"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "links": [
+        {
+          "title": "查看该路由的日志",
+          "type": "link",
+          "url": "/d/loki-log-panels/loki-log-panels?${__url_time_range}&var-route=${__data.fields.route}"
+        }
+      ]
+    },
+    {
+      "id": 103,
+      "type": "logs",
+      "title": "近期应用日志（全部 app 行）",
       "gridPos": {
         "h": 12,
         "w": 24,
         "x": 0,
-        "y": 12
+        "y": 20
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
       },
       "targets": [
         {
-          "datasource": {
-            "type": "loki",
-            "uid": "loki"
-          },
-          "editorMode": "code",
+          "refId": "A",
           "expr": "{service=\"app\"}",
-          "legendFormat": "__auto__",
-          "queryType": "instant",
-          "refId": "A"
+          "queryType": "range",
+          "editorMode": "code",
+          "direction": "backward",
+          "maxLines": 50,
+          "limit": 50
         }
       ],
       "options": {
         "showTime": true,
         "wrapLogMessage": true,
         "sortOrder": "Descending",
-        "enableLogDetails": true,
-        "dedupStrategy": "none"
+        "enableLogDetails": true
       },
       "fieldConfig": {
         "defaults": {},
@@ -151,65 +147,14 @@
       }
     },
     {
-      "id": 4,
-      "type": "table",
-      "title": "路由清单（点击行跳到对应时间段日志）",
-      "datasource": {
-        "type": "loki",
-        "uid": "loki"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 16
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "loki",
-            "uid": "loki"
-          },
-          "editorMode": "code",
-          "expr": "sum by (route) (count_over_time({service=\"app\"} |~ \"(?i)error\" [5m]))",
-          "legendFormat": "{{route}}",
-          "queryType": "instant",
-          "refId": "A"
-        }
-      ],
-      "transformations": [
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {}
-          },
-          "indexByName": {}
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "options": {
-        "showHeader": true
-      },
-      "links": [
-        {
-          "title": "查看该路由的日志",
-          "type": "link",
-          "url": "/d/loki-logs/loki-logs?${__url_time_range}&var-route=${__data.fields.route}"
-        }
-      ]
-    },
-    {
-      "id": 99,
+      "id": 104,
       "type": "logs",
       "title": "按 request_id 追踪：一次请求的全部日志行（AC1）",
       "gridPos": {
         "h": 12,
         "w": 24,
         "x": 0,
-        "y": 24
+        "y": 44
       },
       "datasource": {
         "type": "loki",
@@ -223,8 +168,79 @@
           "editorMode": "code",
           "direction": "backward",
           "maxLines": 50,
-          "limit": 50,
-          "editorModeHint": "0"
+          "limit": 50
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "enableLogDetails": true
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 105,
+      "type": "logs",
+      "title": "按 route 查看（app-overview 点击跳转的落点）",
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 56
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{service=\"app\"} |= \"$route\"",
+          "queryType": "range",
+          "editorMode": "code",
+          "direction": "backward",
+          "maxLines": 50,
+          "limit": 50
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "enableLogDetails": true
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "id": 106,
+      "type": "logs",
+      "title": "脱敏样本：手机号 / 身份证 / Bearer（AC2）",
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{service=\"app\"} |= \"customer_phone\"",
+          "queryType": "range",
+          "editorMode": "code",
+          "direction": "backward",
+          "maxLines": 20,
+          "limit": 20
         }
       ],
       "options": {
@@ -250,6 +266,18 @@
       {
         "name": "request_id",
         "label": "请求 ID（一次请求的 request_id）",
+        "type": "textbox",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        },
+        "hide": 0,
+        "options": []
+      },
+      {
+        "name": "route",
+        "label": "路由（从 app-overview 点进来时自动带）",
         "type": "textbox",
         "query": "",
         "current": {

@@ -10,9 +10,17 @@
 | AC1 | web 与 miniprogram 两个作业在 PR 上均通过（附截图） → 本单为：**在 Grafana 中按 request_id 能查到一次请求的全部日志行（附截图）** | `screenshots/ac1-request-id-all-lines.png`；`evidence/run_all.out`（AC1 段：命中 6 行） | `bash scripts/run_all.sh` |
 | AC2 | 向应用日志写入未脱敏的虚构手机号后，Loki 中查到的是屏蔽后的形式（附截图） | `screenshots/ac2-masked-phone.png`；`evidence/run_all.out`（AC2 段：手机号/身份证/Bearer 三项均遮蔽，明文零残留） | `bash scripts/check_masked_phone.sh` |
 | AC3 | Loki 标签列表 API 只返回 env、host、service、level（附输出） | `evidence/ac3-labels.txt`（dev 与 audit 两个租户的原始输出，均为 `["env","host","level","service"]`） | `bash scripts/check_labels.sh` |
-| AC4 | 非运维、非安全团队的账号在 Grafana 中看不到日志数据源（附截图） | `screenshots/ac4-dev-user-datasources.png`、`screenshots/ac4-dev-user-explore.png`（研发账号导航里没有 Connections / Explore，被弹回首页）；对照 `screenshots/ac4-admin-datasources.png`（管理员可见 Loki 数据源）；`evidence/ac4-access.txt`（ops/security 可见 1 个数据源，dev-user HTTP 403） | `bash scripts/check_team_access.sh` |
+| AC4 | 非运维、非安全团队的账号在 Grafana 中看不到日志数据源（附截图） | `screenshots/ac4-dev-user-no-datasource.png`（研发账号被弹回首页，导航里没有 Connections / Explore）；对照 `screenshots/ac4-admin-datasources.png`（管理员可见 Loki 数据源）；`evidence/ac4-dev-user-api.json`（**dev-user 实调 `GET /api/datasources` 与 `/api/datasources/uid/loki` 均 403 Access denied**）；`evidence/ac4-access.txt`（ops/security 可见 1 个数据源） | `bash scripts/check_team_access.sh` |
 
 `bash scripts/run_all.sh` 一条命令跑完四条，**任一不过即非零退出**；本次运行输出原文见 `evidence/run_all.out`（末尾 `ALL CHECKS PASSED`）。
+
+### 工单正文里另外三项要求（已实现，证据同上）
+
+| 工单要求 | 实现 | 证据 |
+| --- | --- | --- |
+| 面板：①错误日志趋势 ②按 service 统计的 error 数 ③从 app-overview 的 route 点击跳到对应时间段日志 | `grafana/dashboards/loki-log-panels.json` 的「错误日志趋势」「按 service 统计的 error 数」「路由清单」三个面板 + 仪表盘变量 `route`；`grafana/dashboards/app-overview.json` 的路由表带 data link，点行即跳到 `loki-log-panels` 的 `var-route` | `screenshots/ac1-dashboard-overview.png`（三件套首屏） |
+| 单次查询结果上限 5000 行 | Loki 侧 `limits_config.max_entries_limit_per_query: 5000`；Grafana 侧每个日志面板 `maxLines` 限 20～50 行 | `loki/loki-config.local.yml`、`grafana/dashboards/*.json` |
+| 变量：`log_retention_days`、`audit_retention_days`、`loki_storage_backend` | 三个变量在 `.env.example` 里有真源，落成 `LOG_RETENTION_DAYS` / `AUDIT_RETENTION_DAYS` / `LOKI_STORAGE_BACKEND`；前两个由 `scripts/gen_runtime_config.sh` 渲染 `loki/runtime.yaml`，第三个由 `scripts/set_storage_backend.sh` 切换块存储后端 | 见下面「可调变量」一节 |
 
 ## 二、组件与端口
 
@@ -32,6 +40,7 @@
 
 - 客户 `backups` 桶是对象存储（S3/OSS 兼容）。Loki 用对象存储做块存储需要 `storage_config.aws` + `bucket_store` + `shared_store`，配置面更大、更易出错，单机场景收益有限。
 - 切换步骤（README 口径）：把 `storage_config` 换成 `aws(s3)` + `bucket_store`，并把 WAL / chunk cache 指到同一 buckets 段；`common.path_prefix` 保持在同一目录下即可，compactor 的 `delete_request_store` 也要跟着换。
+- 本仓把切换做成了**一条命令**：`LOKI_STORAGE_BACKEND=s3 bash scripts/set_storage_backend.sh` —— 它在 `loki/loki-config.local.yml`（本地盘，已实测跑通）与 `loki/loki-config.s3.yml`（对象存储模板）之间切换；s3 模板里带 `REPLACE_ME_*` 占位（桶名 / region / endpoint / 密钥 / `loki/` 前缀），**没填会被拒绝切换**，避免半配置上线。
 - 备份方式：单机直接对 `runtime/loki/` 做 rsync/tar 归档推送到 `backups` 桶即可（Loki 的 TSDB 文件是自描述的，跨版本恢复需注意版本一致）。
 
 ## 四、留存策略（按环境 / 按租户）
@@ -46,6 +55,18 @@
 | `audit` | 审计日志 | 8760h（365 天） |
 
 compactor 侧 `retention_enabled: true` + `delete_request_store: filesystem`，删除延迟 2 小时（`retention_delete_delay`）。**留存策略真正生效的前提是 compactor 在跑**（本栈里 loki 是单体模式，compactor 与 ingester 同进程 ✔）。
+
+### 可调变量（工单点名的三个 + 脚本用到的其余）
+
+`.env.example` 是变量的真源（复制成 `.env` 后按需改；`.env` 不进仓）：
+
+| 工单变量 | 环境变量 | 默认 | 落到哪 |
+| --- | --- | --- | --- |
+| `log_retention_days` | `LOG_RETENTION_DAYS` | `7` | `scripts/gen_runtime_config.sh` → `loki/runtime.yaml` 的 `dev` 租户 `retention_period`；`TEST_RETENTION_DAYS`（30）/ `PROD_RETENTION_DAYS`（180）同理 |
+| `audit_retention_days` | `AUDIT_RETENTION_DAYS` | `365` | 同上 → `audit` 租户 `retention_period` |
+| `loki_storage_backend` | `LOKI_STORAGE_BACKEND` | `local` | `scripts/set_storage_backend.sh` → `loki/loki-config.yml`（`local` 本地盘 / `s3` 对象存储） |
+
+改留存后要重建 loki 容器（`sudo -n docker compose up -d loki`）让 `runtime_config` 重新加载；`loki/runtime.yaml` 是**生成物**，请通过脚本改，别手改后再被覆盖。
 
 ## 五、标签纪律（本单最硬的要求）
 
@@ -109,10 +130,13 @@ sudo mkdir -p /var/log/clawhunt-app
 export GRAFANA_ADMIN_PASSWORD='<换成你们自己的强口令>'
 sudo -n docker compose up -d
 
-# 2) 初始化 Grafana：团队 / 文件夹 / 数据源（含租户头）/ 仪表盘 / 测试账号
+# 2) 按变量渲染租户留存配置（工单变量 log_retention_days / audit_retention_days）
+bash scripts/gen_runtime_config.sh        # 生成 loki/runtime.yaml
+
+# 3) 初始化 Grafana：团队 / 文件夹 / 数据源（含租户头）/ 仪表盘 / 测试账号
 bash scripts/setup_grafana.sh
 
-# 3) 跑全部验收（fail closed）
+# 4) 跑全部验收（fail closed）
 bash scripts/run_all.sh
 ```
 
@@ -126,6 +150,9 @@ bash scripts/run_all.sh
 | `APP_URL` | `http://127.0.0.1:8080` | 演示应用 |
 | `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` | `admin` / **必填** | admin 账号 |
 | `GRAFANA_USERS_FILE` | `~/.clawhunt/3192-grafana-users.env` | 测试账号口令文件 |
+| `LOG_RETENTION_DAYS` | `7` | 工单变量 `log_retention_days`：dev 租户留存天数 |
+| `AUDIT_RETENTION_DAYS` | `365` | 工单变量 `audit_retention_days`：审计日志留存天数 |
+| `LOKI_STORAGE_BACKEND` | `local` | 工单变量 `loki_storage_backend`：`local` / `s3` |
 | `BUNDLE_MAX_KB` | — | （本单无） |
 
 **容器重建后必须重生成 file_sd targets**（仅当启用 docker_sd 变体）：`bash scripts/gen_docker_targets.sh` —— 容器的 `LogPath` 会变。
@@ -151,8 +178,19 @@ REQUEST_ID=<某次请求的 request_id> \
 node scripts/screenshot.mjs screenshots
 ```
 
-产出 `ac1-request-id-all-lines.png`（AC1）、`ac2-masked-phone.png`（AC2）、`ac4-admin-datasources.png` / `ac4-dev-user-datasources.png` / `ac4-dev-user-explore.png`（AC4 对照）。
-仪表盘带一个 `request_id` 文本变量，URL 带 `?var-request_id=xxx` 即可把某次请求的全部日志行渲染出来。
+产出：
+
+| 文件 | 证据 |
+| --- | --- |
+| `ac1-request-id-all-lines.png` | AC1：单独打开「按 request_id 追踪」面板，一次请求的 6 行日志全部命中（request_id 高亮） |
+| `ac1-dashboard-overview.png` | 工单面板三件套（错误日志趋势 / 按 service 统计 error 数 / 路由清单）首屏 |
+| `ac2-masked-phone.png` | AC2：单独打开「脱敏样本」面板，`138****1111` / `****************4` / `Bearer [REDACTED]` 一眼可见 |
+| `ac4-admin-datasources.png` | AC4 对照组：管理员能看到 Loki 数据源 |
+| `ac4-dev-user-no-datasource.png` | AC4：研发账号看不到任何数据源（被弹回首页，导航里没有 Connections / Explore） |
+| `../evidence/ac4-dev-user-api.json` | AC4 的 API 级证据：dev-user 实调数据源 API 返回 403 |
+
+仪表盘带 `request_id` 与 `route` 两个文本变量，URL 带 `?var-request_id=xxx` 即可把某次请求的全部日志行渲染出来。
+面板在视口外时 Grafana 不会渲染（react-grid 虚拟化）⇒ 脚本用 `?viewPanel=<id>` **单独打开**目标面板再截图，避免整页截图下半段是空白。
 
 ## 十一、数据与保密
 

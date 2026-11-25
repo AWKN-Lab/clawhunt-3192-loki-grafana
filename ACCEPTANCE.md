@@ -72,10 +72,29 @@ $ curl -s -H 'X-Scope-OrgID: audit' http://127.0.0.1:3100/loki/api/v1/labels
   - `dev-user` → **HTTP 403**，看不到任何数据源；直取 `GET /api/datasources/uid/loki` 也是 403
 - 截图（对照）：
   - `screenshots/ac4-admin-datasources.png` —— 管理员在 Connections → Data sources 能看到 Loki 数据源
-  - `screenshots/ac4-dev-user-datasources.png`、`screenshots/ac4-dev-user-explore.png` —— 研发账号登录后导航里**没有 Connections / Explore**，访问数据源页被弹回首页
-- 复现：`bash scripts/check_team_access.sh`
+  - `screenshots/ac4-dev-user-no-datasource.png` —— 研发账号登录后导航里**没有 Connections / Explore**，访问数据源页被弹回首页
+- API 级证据（截图之外更硬的一条）：`evidence/ac4-dev-user-api.json` —— 研发账号在浏览器会话里实调
+  - `GET /api/datasources` → **403** `{"message":"You'll need additional permissions to perform this action. Permissions needed: datasources:read","title":"Access denied"}`
+  - `GET /api/datasources/uid/loki` → **403**（直取 UID 也拿不到）
+  - `GET /api/dashboards/home` → 200（能进首页，但没有任何数据源）
+- 复现：`bash scripts/check_team_access.sh`（截图脚本 `scripts/screenshot.mjs` 每次运行都会重写 `evidence/ac4-dev-user-api.json`）
 - 实现与边界：Grafana OSS 11.3 **没有数据源级权限**（相关 API 返回 404，属 Enterprise 能力），且 datasource provisioning 不认 `folder`/`folderUid` ⇒ 本单用**组织角色**落地可见性：ops/security = Viewer，dev = **None**（Grafana OSS 的「无权限」基础角色）。详见 README 第七节。
 
 ## 一次性跑完全部验收的输出
 
 `evidence/run_all.out`（末尾 `ALL CHECKS PASSED`，退出码 0）。
+
+## 工单正文里另外三项要求（非 AC，但工单正文点名）
+
+| 要求 | 实现 | 证据 / 复现 |
+| --- | --- | --- |
+| 面板：错误日志趋势、按 service 统计的 error 数、从 app-overview 的 route 点击跳到对应时间段日志 | `loki-log-panels` 仪表盘的前三个面板 + `route` 变量；`app-overview` 路由表带 data link（点行 → `loki-log-panels?var-route=...`） | `screenshots/ac1-dashboard-overview.png` |
+| 单次查询结果上限 5000 行 | Loki `limits_config.max_entries_limit_per_query: 5000` + Grafana 面板 `maxLines` | `loki/loki-config.local.yml` |
+| 变量 `log_retention_days` / `audit_retention_days` / `loki_storage_backend` | `.env.example` 为真源；`scripts/gen_runtime_config.sh` 渲染留存；`scripts/set_storage_backend.sh` 切块存储 | `bash scripts/gen_runtime_config.sh` / `LOKI_STORAGE_BACKEND=s3 bash scripts/set_storage_backend.sh` |
+
+## 已知边界（如实声明）
+
+1. **Grafana OSS 没有数据源级权限**：`GET/POST /api/datasources/uid/:uid/permissions` 返回 404（Enterprise 能力）。本单用**组织角色**落地「看不到数据源」：dev = None（实测 403）。若客户用 Enterprise，可改用数据源级权限，`scripts/setup_grafana.sh` 里已按团队下过授权调用。
+2. **仪表盘/文件夹授权接口在本环境返回 200 但不落库**（`dashboard_acl` / `permission` 表无新增行）⇒ 仪表盘放在 General、面板演示用 admin 账号，不作为 AC4 判定依据。
+3. **`/var/log/auth.log`、`/var/log/syslog` 在本机（容器化宿主）不存在** ⇒ promtail 会标记该 target “no files matched requested path”；为演示同一条静态采集 + 脱敏管道，另配 `host_sample_logs` 作业读 `/var/log/clawhunt-sample/*.log`（**内容全部虚构**）。客户环境有真实系统日志时改 `__path__` 即可。
+4. **未做任何境外转发**：整套栈只在本机 host 网络内，`loki/promtail/grafana` 均无出网采集路径；日志查询未经过任何第三方 SDK。

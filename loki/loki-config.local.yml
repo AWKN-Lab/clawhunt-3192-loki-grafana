@@ -1,0 +1,87 @@
+# Loki 单体模式（monolithic）+ 文件块存储
+#
+# 选型说明（工单要求「块存储使用 backups 桶 loki/ 前缀或本地数据盘，README 说明选择」）：
+#   本仓选**本地数据盘**（./runtime/loki，映射到容器 /loki）。理由：
+#   1) 客户的 backups 桶是 S3/OSS 兼容对象存储，Loki 用对象存储做块存储需要
+#      `storage_config.aws` + `bucket_store` + `shared_store`，配置面更大、更易出错；
+#      单机的写放大与元数据抖动也更高。
+#   2) 本单的日志量在单节点规模下用本地盘足够，且便于直接备份（rsync/tar）到 backups 桶。
+#   3) 若客户要求改用 backups 桶：把 storage_config 换成 aws(s3) + bucket_store，
+#      并把 WAL/chunk cache 指到同一 buckets 段，README「切换到对象存储」一节给出步骤。
+auth_enabled: true
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level: warn
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+storage_config:
+  tsdb_shipper:
+    active_index_directory: /loki/tsdb-index
+    cache_location: /loki/tsdb-cache
+  filesystem:
+    directory: /loki/chunks
+  # ── LOKI_STORAGE_BACKEND=s3 的切换说明（scripts/set_storage_backend.sh）──
+  # 本文件是 local（本地数据盘）后端；对象存储版本见 loki/loki-config.s3.yml。
+
+limits_config:
+  # dev 默认留存 7 天（168h）。test / prod / audit 的留存由 runtime_config 按租户覆盖。
+  retention_period: 168h
+  # 单次查询返回行数上限（Grafana 与 API 侧同为 5000 行，工单要求）
+  max_entries_limit_per_query: 5000
+  max_query_series: 5000
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+  ingestion_rate_mb: 16
+  ingestion_burst_size_mb: 32
+  # ★ Loki 默认会**自动给每条流补一个 service_name 标签**（依次找 service/app/name/…，
+  #   找不到填 "unknown_service"）。官方文档：给 discover_service_name 传**空列表**即禁用。
+  #   工单要求「Loki 标签列表 API 只返回 env、host、service、level」⇒ 禁用自动补标签。
+  discover_service_name: []
+  # Loki 3.2+ 会**自动探测日志行里的 level 并加 detected_level 标签**
+  # （同样是限流配置里的一个开关）。工单要求标签恰好是 env/host/service/level ⇒ 关掉。
+  discover_log_levels: false
+
+compactor:
+  working_directory: /loki/compactor
+  compaction_interval: 10m
+  retention_enabled: true
+  delete_request_store: filesystem
+  retention_delete_delay: 2h
+  retention_delete_worker_count: 50
+
+ruler:
+  storage:
+    type: local
+    local:
+      directory: /loki/rules
+
+# 按环境/用途分租户留存：dev 7 天、test 30 天、prod 180 天、audit 365 天
+runtime_config:
+  file: /etc/loki/runtime.yaml
+  period: 10s
+
+analytics:
+  reporting_enabled: false

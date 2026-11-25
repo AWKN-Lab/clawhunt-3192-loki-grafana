@@ -1,84 +1,84 @@
 {
- "annotations": {
-  "list": [
-   {
-    "builtIn": 1,
-    "datasource": {
-     "type": "grafana",
-     "uid": "-- Grafana --"
-    },
-    "enable": true,
-    "hide": true,
-    "iconColor": "rgba(0, 211, 255, 1)",
-    "name": "Annotations & Alerts",
-    "type": "dashboard"
-   }
-  ]
- },
- "editable": true,
- "graphTooltip": 1,
- "links": [],
- "panels": [
-  {
-   "id": 1,
-   "type": "table",
-   "title": "应用路由概览（点击 → 跳到该 route 对应时间段的日志）",
-   "datasource": {
-    "type": "loki",
-    "uid": "loki"
-   },
-   "gridPos": {
-    "h": 10,
-    "w": 24,
-    "x": 0,
-    "y": 0
-   },
-   "targets": [
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "graphTooltip": 1,
+  "links": [],
+  "panels": [
     {
-     "datasource": {
-      "type": "loki",
-      "uid": "loki"
-     },
-     "editorMode": "code",
-     "expr": "sum by (route) (count_over_time({service=\"app\"} [5m]))",
-     "legendFormat": "{{route}}",
-     "queryType": "instant",
-     "refId": "A"
+      "id": 1,
+      "type": "table",
+      "title": "应用路由概览（点击 → 跳到该 route 对应时间段的日志）",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "editorMode": "code",
+          "expr": "sum by (route) (count_over_time({service=\"app\"} [5m]))",
+          "legendFormat": "{{route}}",
+          "queryType": "instant",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      },
+      "links": [
+        {
+          "title": "查看该路由的日志",
+          "type": "link",
+          "url": "/d/loki-log-panels/loki-log-panels?${__url_time_range}&var-route=${__data.fields.route}"
+        }
+      ]
     }
-   ],
-   "fieldConfig": {
-    "defaults": {},
-    "overrides": []
-   },
-   "options": {
-    "showHeader": true
-   },
-   "links": [
-    {
-     "title": "查看该路由的日志",
-     "type": "link",
-     "url": "/d/loki-logs/loki-logs?${__url_time_range}&var-route=${__data.fields.route}"
-    }
-   ]
-  }
- ],
- "refresh": "10s",
- "schemaVersion": 39,
- "tags": [
-  "clawhunt",
-  "3192"
- ],
- "templating": {
-  "list": []
- },
- "time": {
-  "from": "now-1h",
-  "to": "now"
- },
- "timepicker": {},
- "timezone": "browser",
- "title": "app-overview",
- "uid": "app-overview",
- "version": 1,
- "weekStart": ""
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": [
+    "clawhunt",
+    "3192"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "app-overview",
+  "uid": "app-overview",
+  "version": 1,
+  "weekStart": ""
 }
