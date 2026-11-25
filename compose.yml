@@ -1,0 +1,95 @@
+# ClawHunt #3192 · Loki + Promtail + Grafana 采集留存栈
+#
+# 组成：loki（单体模式，文件块存储） + promtail-app + promtail-audit + grafana + app
+# 网络：**host 网络**（不使用 bridge）。两个原因：
+#   1) 实测该宿主机上 bridge 的容器间数据通路不通（ARP/路由正常但连接返回
+#      EHOSTUNREACH，FORWARD=DROP + br_netfilter 组合下 bridge 同网段流量被丢）；
+#   2) host 网络下 Loki/Promtail/Grafana 用 127.0.0.1 互通，端口即宿主端口，
+#      少一层 NAT，排障路径最短。Loki 官方 compose 示例同样常用 host 网络。
+# 端口：3100 Loki 查询 API / 3200 Prometheus 兼容查询 / 3000 Grafana / 8080 演示应用
+name: clawhunt-3192
+
+services:
+  loki:
+    image: grafana/loki:3.4.2
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - ./loki/runtime.yaml:/etc/loki/runtime.yaml:ro
+      - ./runtime/loki:/loki
+    network_mode: host
+    environment:
+      LOKI_TENANT: dev
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:3100/ready || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  promtail-app:
+    image: grafana/promtail:3.4.2
+    network_mode: host
+    # 采 docker 的 json 日志文件需要读 /var/lib/docker/containers/<id>/（root 0700）
+    # ⇒ promtail 以 root 运行（这也是 promtail 官方采容器日志的常规做法）。
+    user: root
+    command: -config.file=/etc/promtail/promtail-config.yml -client.url=http://127.0.0.1:3100/loki/api/v1/push -client.tenant-id=dev
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/log:/host/var/log:ro
+      - ./runtime/promtail-targets:/etc/promtail/targets
+      # ★ positions 必须**每个 promtail 独立**：共用一个文件时，先跑的实例把游标
+      #   推进了，后跑的实例认为「已读」⇒ 同一个日志只被推到一个租户。
+      - ./runtime/positions-app:/tmp/positions
+    depends_on:
+      loki:
+        condition: service_healthy
+
+  promtail-audit:
+    image: grafana/promtail:3.4.2
+    network_mode: host
+    user: root
+    command: -config.file=/etc/promtail/promtail-config.yml -client.url=http://127.0.0.1:3100/loki/api/v1/push -client.tenant-id=audit -server.http-listen-port=9081
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/log:/host/var/log:ro
+      - ./runtime/promtail-targets:/etc/promtail/targets
+      - ./runtime/positions-audit:/tmp/positions
+    depends_on:
+      loki:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin-local-only}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./runtime/grafana:/var/lib/grafana
+    network_mode: host
+    depends_on:
+      loki:
+        condition: service_healthy
+
+  app:
+    image: python:3.11-slim
+    command: ["python3", "/app/app.py"]
+    environment:
+      APP_ENV: dev
+      APP_SERVICE: app
+      APP_HOST: 3192-demo
+    volumes:
+      - ./app:/app:ro
+      # 与 stdout 完全相同的 JSON 日志副本落在这里（供 promtail 静态采集）
+      - /var/log/clawhunt-app:/var/log/app
+    network_mode: host
+    # ★ 刻意**不**给容器打 environment/service/host 标签：
+    #   promtail 的 docker 阶段会把容器标签注入日志流（会多出 service_name 等），
+    #   而工单要求标签集合恰为 env/host/service/level。
+    #   四个标签统一由 file_sd 的 targets 文件提供（scripts/gen_docker_targets.sh）。

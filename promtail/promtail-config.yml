@@ -1,0 +1,159 @@
+# Promtail：采集应用容器 JSON 日志 + 主机系统日志，并对日志正文做兜底脱敏
+#
+# 标签纪律（工单硬要求）：**只用 env / host / service / level 四个低基数标签**。
+# request_id 与 user_id 留在日志正文里，用 LogQL 解析，**不做标签**
+#（否则标签基数会随请求量爆炸）。
+#
+# 三个实测踩过的坑（README「排障记录」有完整说明）：
+#  1) promtail 的 static_configs.targets 里放的是**主机名**，文件路径要写在
+#     labels.__path__（写反了会被判成 reason="no_path"，一个 target 都不起）。
+#  2) promtail 会在**流水线之前**给每条日志注入 filename 标签
+#     （源码 clients/pkg/promtail/targets/file/tailer.go：
+#      api.AddLabelsMiddleware({filename: path}).Wrap(handler)），
+#     relabel 阶段删不掉它；**labelallow 这个流水线阶段在其之后执行，可以删**。
+#     本配置统一用白名单（labelallow），而不是逐个黑名单：
+#     将来采集端再注入新标签也会被挡在 Loki 之外。
+#  3) Loki 侧还会自动补两个标签，同样要在 limits_config 里关：
+#     discover_service_name: []（否则多出 service_name）
+#     discover_log_levels: false（否则多出 detected_level）
+#
+# 租户：客户端 URL/租户由 compose 的 -client.url / -client.tenant-id 指定，
+# promtail-app → dev（7 天），promtail-audit → audit（365 天）。
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level: warn
+
+positions:
+  filename: /tmp/positions/positions.yaml
+
+scrape_configs:
+  # ── ① 应用容器 JSON 日志 ──────────────────────────────────────────
+  # 采集的是**应用写出的同一份 JSON 日志**（stdout 的文件副本，
+  # 由 compose 把宿主 /var/log/clawhunt-app 挂到容器 /var/log/app）。
+  # 为什么不用 promtail 的 docker_sd / docker 阶段：
+  #   那两条路径都会额外注入 service_name / detected_level 标签，
+  #   与工单「标签只返回 env/host/service/level」冲突（实测）。
+  #   客户若接受这两个额外低基数标签，可用 promtail/promtail-docker-sd.yml 切换。
+  - job_name: app_json_logs
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          env: dev
+          host: 3192-demo
+          service: app
+          __path__: /host/var/log/clawhunt-app/app-json.log
+    pipeline_stages:
+      # ── 标签白名单（AC3）：只保留 env / host / service / level ──────
+      - labelallow:
+          - env
+          - host
+          - service
+          - level
+      - json:
+          expressions:
+            level: level
+      - labels:
+          level:
+      - timestamp:
+          source: ts
+          format: RFC3339Nano
+      # ── 兜底脱敏：手机号 / 身份证号 / Bearer 令牌 ────────────────────
+      # 规则与工单一致（手机号保留前 3 后 4，身份证保留首尾各 1 位，Bearer 令牌整体抹掉）。
+      #
+      # ⚠️ promtail 的 replace 阶段用的是 **text/template**，不是正则展开：
+      #    `$1` / `${1}` 不会被展开，而且**每个捕获组都会被替换成同一段模板文本**。
+      #    ⇒ 正确写法是：正则**只捕获要打码的那一段**，替换串用**常量**。
+      #      例：手机号中间 4 位 → \b1[3-9]\d(\d{4})\d{4}\b 捕获中间 4 位 → 替换成 ****
+      - replace:
+          expression: "\\b1[3-9]\\d(\\d{4})\\d{4}\\b"
+          replace: "****"
+      - replace:
+          expression: "\\b\\d(\\d{16})[\\dXx]\\b"
+          replace: "****************"
+      - replace:
+          expression: "(?i)bearer\\s+([A-Za-z0-9._~+/=-]+)"
+          replace: "[REDACTED]"
+
+  # ── ② 主机系统日志（auth.log）─────────────────────────────────────
+  # 注意：部分容器化宿主机上这两个文件不存在，promtail 会标记 target 为
+  # "no files matched requested path"（不影响其它作业）。
+  - job_name: host_auth_log
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          env: dev
+          host: 3192-demo
+          service: host
+          __path__: /host/var/log/auth.log
+    pipeline_stages:
+      - labelallow:
+          - env
+          - host
+          - service
+          - level
+      - replace:
+          expression: "\\b1[3-9]\\d(\\d{4})\\d{4}\\b"
+          replace: "****"
+      - replace:
+          expression: "\\b\\d(\\d{16})[\\dXx]\\b"
+          replace: "****************"
+      - replace:
+          expression: "(?i)bearer\\s+([A-Za-z0-9._~+/=-]+)"
+          replace: "[REDACTED]"
+
+  # ── ③ 主机系统日志（syslog）───────────────────────────────────────
+  - job_name: host_syslog
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          env: dev
+          host: 3192-demo
+          service: host
+          __path__: /host/var/log/syslog
+    pipeline_stages:
+      - labelallow:
+          - env
+          - host
+          - service
+          - level
+      - replace:
+          expression: "\\b1[3-9]\\d(\\d{4})\\d{4}\\b"
+          replace: "****"
+      - replace:
+          expression: "\\b\\d(\\d{16})[\\dXx]\\b"
+          replace: "****************"
+      - replace:
+          expression: "(?i)bearer\\s+([A-Za-z0-9._~+/=-]+)"
+          replace: "[REDACTED]"
+
+  # ── ④ 主机示例日志（演示同一套静态采集 + 脱敏路径；内容全部虚构）──
+  # 客户环境若有真实 auth.log / syslog，用 ②③ 即可；
+  # ④ 用来在演示环境里展示「同一套静态采集 + 脱敏管道」在系统日志上的效果。
+  - job_name: host_sample_logs
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          env: dev
+          host: 3192-demo
+          service: host
+          __path__: /host/var/log/clawhunt-sample/*.log
+    pipeline_stages:
+      - labelallow:
+          - env
+          - host
+          - service
+          - level
+      - replace:
+          expression: "\\b1[3-9]\\d(\\d{4})\\d{4}\\b"
+          replace: "****"
+      - replace:
+          expression: "\\b\\d(\\d{16})[\\dXx]\\b"
+          replace: "****************"
+      - replace:
+          expression: "(?i)bearer\\s+([A-Za-z0-9._~+/=-]+)"
+          replace: "[REDACTED]"

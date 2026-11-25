@@ -1,0 +1,22 @@
+apiVersion: 1
+datasources:
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://127.0.0.1:3100
+    # ★ 数据源必须落在受控文件夹里：Grafana 的「General」文件夹默认对所有用户可读，
+    #   放那里 ⇒ 任何登录用户都能看到数据源（AC4 就不成立了）。
+    #   ⚠️ Grafana 11.3 的 datasource provisioning **不认 folder/folderUid**
+    #   （实测两种写法都落到 General）⇒ 数据源改由 scripts/setup_grafana.sh
+    #   用 POST /api/datasources（带 folderUid）建到 loki-logs 文件夹里。
+    #   本文件保留为「连接参数的唯一真源」，setup 脚本会读它并落到受控文件夹。
+    isDefault: true
+    editable: true
+    jsonData:
+      maxLines: 5000
+      timeout: 60
+      derivedFields:
+        - name: RequestID
+          matcherRegex: '"request_id":"([^"]+)"'
+          url: '$${__value.raw}'

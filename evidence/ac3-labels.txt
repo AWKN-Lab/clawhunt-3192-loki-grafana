@@ -1,0 +1,12 @@
+# Loki 标签列表 API 原始输出（AC3）
+# 生成时间: 2026-11-25T08:13:53Z
+
+$ curl -s -H 'X-Scope-OrgID: dev' http://127.0.0.1:3100/loki/api/v1/labels
+{"status":"success","data":["env","host","level","service"]}
+
+
+$ curl -s -H 'X-Scope-OrgID: audit' http://127.0.0.1:3100/loki/api/v1/labels
+{"status":"success","data":["env","host","level","service"]}
+
+
+# 期望: ["env","host","level","service"] —— 恰好四个低基数标签

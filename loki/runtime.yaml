@@ -1,0 +1,11 @@
+# 租户级留存覆盖（被 loki 的 runtime_config 加载；Loki 3.x 的 override 是扁平字段）
+# dev 7 天 / test 30 天 / prod 180 天 / audit 365 天
+overrides:
+  dev:
+    retention_period: 168h
+  test:
+    retention_period: 720h
+  prod:
+    retention_period: 4320h
+  audit:
+    retention_period: 8760h

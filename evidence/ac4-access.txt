@@ -1,0 +1,14 @@
+# Grafana 数据源可见性原始输出（AC4）
+# 生成时间: 2026-11-25T08:13:54Z
+
+$ curl -u 'ops-user:***' http://127.0.0.1:3000/api/datasources   → HTTP 200
+[{"id":2,"uid":"loki","orgId":1,"name":"Loki","type":"loki","typeName":"Loki","typeLogoUrl":"public/app/plugins/datasource/loki/img/loki_icon.svg","access":"proxy","url":"http://127.0.0.1:3100","user":"","database":"","basicAuth":false,"isDefault":true,"jsonData":{"derivedFields":[{"matcherRegex":"\
+
+$ curl -u 'security-user:***' http://127.0.0.1:3000/api/datasources   → HTTP 200
+[{"id":2,"uid":"loki","orgId":1,"name":"Loki","type":"loki","typeName":"Loki","typeLogoUrl":"public/app/plugins/datasource/loki/img/loki_icon.svg","access":"proxy","url":"http://127.0.0.1:3100","user":"","database":"","basicAuth":false,"isDefault":true,"jsonData":{"derivedFields":[{"matcherRegex":"\
+
+$ curl -u 'dev-user:***' http://127.0.0.1:3000/api/datasources   → HTTP 403
+{"accessErrorId":"ACE8892947985","message":"You'll need additional permissions to perform this action. Permissions needed: datasources:read","title":"Access denied"}
+
+
+$ curl -u 'dev-user:***' http://127.0.0.1:3000/api/datasources/uid/loki   → HTTP 403（应为 403/404）
